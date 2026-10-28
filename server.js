@@ -9,30 +9,27 @@ const cookieParser = require("cookie-parser");
 const connectDB = require("./config/db");
 
 // ── Routes ──────────────────────────────────────────────────────────────────
-const emailRoutes   = require("./routes/email");
-const authRoutes    = require("./routes/auth");
-const courseRoutes  = require("./routes/courses");
+const emailRoutes = require("./routes/email");
+const authRoutes = require("./routes/auth");
+const courseRoutes = require("./routes/courses");
 const paymentRoutes = require("./routes/payments");
-const qnaRoutes     = require("./routes/qna");
-
+const qnaRoutes = require("./routes/qna");
 // ── App setup ───────────────────────────────────────────────────────────────
 const app = express();
 
 const allowedOrigins = [
   "http://localhost:5000",
   "http://127.0.0.1:5000",
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  process.env.FRONTEND_URL
-].filter(Boolean);
+  "https://edusphere-frontend-2ks3.vercel.app"
+];
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin) || origin.endsWith(".github.io")) {
+      if (!origin || allowedOrigins.indexOf(origin) !== -1 || origin.endsWith(".vercel.app")) {
         callback(null, true);
       } else {
-        callback(null, true); // Allow during deployment testing
+        callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
@@ -42,12 +39,12 @@ app.use(express.json());
 app.use(cookieParser());
 
 // ── Mount routes ─────────────────────────────────────────────────────────────
-app.use("/api/email",    emailRoutes);
-app.use("/api/auth",     authRoutes);
-app.use("/api/courses",  courseRoutes);
+app.use("/api/email", emailRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/courses", courseRoutes);
 app.use("/api/payments", paymentRoutes);
-app.use("/api/reports",  paymentRoutes);
-app.use("/api/qna",      qnaRoutes);
+app.use("/api/reports", paymentRoutes);
+app.use("/api/qna", qnaRoutes);
 
 // Health check
 app.get("/", (req, res) => {
@@ -59,7 +56,7 @@ app.get("/", (req, res) => {
 });
 
 // ── Start (connect DB first, then listen) ────────────────────────────────────
-const PORT = process.env.BACKEND_PORT || 5001;
+const PORT = process.env.PORT || process.env.BACKEND_PORT || 5001;
 
 connectDB().then(() => {
   app.listen(PORT, () => {
