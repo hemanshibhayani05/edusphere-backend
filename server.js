@@ -18,9 +18,23 @@ const qnaRoutes     = require("./routes/qna");
 // ── App setup ───────────────────────────────────────────────────────────────
 const app = express();
 
+const allowedOrigins = [
+  "http://localhost:5000",
+  "http://127.0.0.1:5000",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: ["http://localhost:5000", "http://127.0.0.1:5000"],
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin) || origin.endsWith(".github.io")) {
+        callback(null, true);
+      } else {
+        callback(null, true); // Allow during deployment testing
+      }
+    },
     credentials: true,
   })
 );
