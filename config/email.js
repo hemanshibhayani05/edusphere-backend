@@ -4,6 +4,7 @@ const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 465,
   secure: true,
+  family: 4, // Force IPv4 to prevent ENETUNREACH on cloud hosts like Render
   auth: {
     user: process.env.EMAIL_USER || "hemanshibhayani05@gmail.com",
     pass: process.env.EMAIL_PASSWORD || "ascmikpovratqyjm",
