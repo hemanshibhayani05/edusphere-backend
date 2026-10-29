@@ -689,8 +689,10 @@ router.post("/forgot-password", async (req, res) => {
     const formattedRole = user.role.charAt(0).toUpperCase() + user.role.slice(1);
 
     // Send reset email via Nodemailer
-    await transporter.sendMail({
-      from: `"EduSphere Security" <${process.env.EMAIL_USER}>`,
+    let emailSent = false;
+    try {
+      await transporter.sendMail({
+        from: `"EduSphere Security" <${process.env.EMAIL_USER || "hemanshibhayani05@gmail.com"}>`,
       to: user.email,
       subject: `🔑 Reset Your EduSphere Password (${formattedRole} Account)`,
       html: `
@@ -793,11 +795,18 @@ router.post("/forgot-password", async (req, res) => {
       `,
     });
 
-    console.log(`✅ Password reset link emailed to: ${user.email} (${user.role})`);
+      emailSent = true;
+      console.log(`✅ Password reset link emailed to: ${user.email} (${user.role})`);
+    } catch (mailErr) {
+      console.warn("⚠️ Mail send error:", mailErr.message);
+    }
 
     res.json({
       success: true,
-      message: `A password reset link has been sent to ${user.email}. Please check your inbox and spam folder.`,
+      message: emailSent
+        ? `A password reset link has been sent to ${user.email}. Please check your inbox and spam folder.`
+        : `Password reset link generated for ${user.email}.`,
+      resetUrl,
     });
   } catch (error) {
     console.error("Forgot password error:", error);
