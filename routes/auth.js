@@ -1,8 +1,10 @@
 const express = require("express");
 const router = express.Router();
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const BlacklistedToken = require("../models/BlacklistedToken");
+const transporter = require("../config/email");
 const {
   generateAccessToken,
   generateRefreshToken,
@@ -618,6 +620,318 @@ router.get("/blacklisted", authenticateToken, authorizeRoles("admin"), async (re
     res.json({ success: true, count, tokens });
   } catch (error) {
     res.status(500).json({ success: false, message: "Error fetching blacklisted tokens." });
+  }
+});
+
+// ── POST /api/auth/forgot-password ───────────────────────────────────────────
+// Sends a password reset link to user email (student or instructor)
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email, role } = req.body;
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Email address is required.",
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "No account found with this email address. Please verify your email or register.",
+      });
+    }
+
+    // Role check if provided
+    if (role) {
+      const requestedRole = role.toString().trim().toLowerCase();
+      if (user.role.toLowerCase() !== requestedRole) {
+        return res.status(400).json({
+          success: false,
+          message: `This account is registered as "${user.role}", not "${role}". Please select "${user.role.charAt(0).toUpperCase() + user.role.slice(1)}" to continue.`,
+        });
+      }
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "This account has been deactivated. Please contact support.",
+      });
+    }
+
+    // Generate secure random reset token
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const hashedToken = crypto.createHash("sha256").update(resetToken).digest("hex");
+
+    // Token expires in 1 hour
+    user.resetPasswordToken = hashedToken;
+    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000);
+    await user.save({ validateBeforeSave: false });
+
+    // Determine client frontend URL
+    const origin = req.headers.origin || req.headers.referer;
+    let clientBaseUrl = process.env.FRONTEND_URL || "https://edusphere-frontend-two.vercel.app";
+    if (origin) {
+      try {
+        const parsed = new URL(origin);
+        clientBaseUrl = `${parsed.protocol}//${parsed.host}`;
+      } catch (_) {
+        clientBaseUrl = origin.replace(/\/$/, "");
+      }
+    }
+
+    const resetUrl = `${clientBaseUrl}/reset-password/${resetToken}`;
+    const formattedRole = user.role.charAt(0).toUpperCase() + user.role.slice(1);
+
+    // Send reset email via Nodemailer
+    await transporter.sendMail({
+      from: `"EduSphere Security" <${process.env.EMAIL_USER}>`,
+      to: user.email,
+      subject: `🔑 Reset Your EduSphere Password (${formattedRole} Account)`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Reset Your Password</title>
+        </head>
+        <body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f6; padding: 40px 10px;">
+            <tr>
+              <td align="center">
+                <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 580px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.08); border: 1px solid #e5e7eb;">
+                  
+                  <!-- HEADER -->
+                  <tr>
+                    <td style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding: 32px 30px; text-align: center;">
+                      <div style="background: rgba(255,255,255,0.2); width: 60px; height: 60px; line-height: 60px; border-radius: 50%; margin: 0 auto 12px; font-size: 28px; color: #ffffff;">
+                        🔑
+                      </div>
+                      <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">
+                        Password Reset Request
+                      </h1>
+                      <p style="margin: 6px 0 0; color: #e0e7ff; font-size: 13.5px;">
+                        EduSphere Learning Platform
+                      </p>
+                    </td>
+                  </tr>
+
+                  <!-- BODY CONTENT -->
+                  <tr>
+                    <td style="padding: 32px 30px 24px;">
+                      <p style="margin: 0 0 16px; font-size: 16px; color: #1f2937;">
+                        Hello <strong>${user.name || formattedRole}</strong>,
+                      </p>
+                      <p style="margin: 0 0 20px; font-size: 14.5px; color: #4b5563; line-height: 1.6;">
+                        We received a request to reset the password for your <strong>${formattedRole}</strong> account associated with <strong>${user.email}</strong>.
+                      </p>
+                      <p style="margin: 0 0 24px; font-size: 14.5px; color: #4b5563; line-height: 1.6;">
+                        Click the button below to choose a new password. This reset link is valid for <strong>60 minutes</strong>.
+                      </p>
+
+                      <!-- CTA BUTTON -->
+                      <table width="100%" cellpadding="0" cellspacing="0" style="margin: 28px 0;">
+                        <tr>
+                          <td align="center">
+                            <a href="${resetUrl}" target="_blank" style="display: inline-block; background: #4f46e5; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 15px; padding: 14px 36px; border-radius: 10px; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35); letter-spacing: 0.3px;">
+                              Reset My Password →
+                            </a>
+                          </td>
+                        </tr>
+                      </table>
+
+                      <!-- DETAILS BOX -->
+                      <table width="100%" cellpadding="0" cellspacing="0" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 18px; margin-bottom: 22px; font-size: 13px;">
+                        <tr>
+                          <td style="color: #64748b; padding: 4px 0;">Account Role:</td>
+                          <td style="text-align: right; font-weight: 600; color: #4f46e5; padding: 4px 0;">${formattedRole}</td>
+                        </tr>
+                        <tr>
+                          <td style="color: #64748b; padding: 4px 0;">Account Email:</td>
+                          <td style="text-align: right; font-weight: 600; color: #1e293b; padding: 4px 0;">${user.email}</td>
+                        </tr>
+                        <tr>
+                          <td style="color: #64748b; padding: 4px 0;">Link Validity:</td>
+                          <td style="text-align: right; color: #e11d48; font-weight: 600; padding: 4px 0;">1 Hour (60 mins)</td>
+                        </tr>
+                      </table>
+
+                      <p style="margin: 0 0 12px; font-size: 13px; color: #64748b; line-height: 1.5;">
+                        If the button above does not work, copy and paste this link into your browser:
+                      </p>
+                      <p style="margin: 0 0 24px; font-size: 12px; word-break: break-all; background: #f1f5f9; padding: 10px 14px; border-radius: 6px; color: #475569; font-family: monospace;">
+                        <a href="${resetUrl}" style="color: #4f46e5; text-decoration: underline;">${resetUrl}</a>
+                      </p>
+
+                      <div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 12px 14px; border-radius: 6px; margin-bottom: 8px;">
+                        <p style="margin: 0; font-size: 12.5px; color: #92400e; line-height: 1.5;">
+                          <strong>Security Note:</strong> If you did not make this request, you can safely ignore this email. Your password will remain unchanged and your account is secure.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+
+                  <!-- FOOTER -->
+                  <tr>
+                    <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 18px 24px; text-align: center; font-size: 12px; color: #94a3b8;">
+                      © ${new Date().getFullYear()} EduSphere Learning Platform. Automated security notification sent to ${user.email}.
+                    </td>
+                  </tr>
+
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>
+      `,
+    });
+
+    console.log(`✅ Password reset link emailed to: ${user.email} (${user.role})`);
+
+    res.json({
+      success: true,
+      message: `A password reset link has been sent to ${user.email}. Please check your inbox and spam folder.`,
+    });
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to process password reset request.",
+    });
+  }
+});
+
+// ── GET /api/auth/verify-reset-token/:token ──────────────────────────────────
+// Validates if a password reset token is active and unexpired
+router.get("/verify-reset-token/:token", async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: "Reset token is required.",
+      });
+    }
+
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+    const user = await User.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: "This password reset link is invalid or has expired. Please request a new one.",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Token is valid.",
+      email: user.email,
+      name: user.name,
+      role: user.role,
+    });
+  } catch (error) {
+    console.error("Verify reset token error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error verifying reset token.",
+    });
+  }
+});
+
+// ── POST /api/auth/reset-password/:token ─────────────────────────────────────
+// Resets user password using the verified token
+router.post("/reset-password/:token", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: "Reset token is required.",
+      });
+    }
+
+    if (!password || password.trim().length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters long.",
+      });
+    }
+
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+    const user = await User.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: "Password reset link is invalid or has expired. Please request a new one.",
+      });
+    }
+
+    // Set new plain password (pre-save hook will hash it with bcrypt)
+    user.password = password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+
+    await user.save();
+
+    console.log(`🔐 Password successfully reset for user: ${user.email} (${user.role})`);
+
+    // Fire-and-forget confirmation email
+    transporter.sendMail({
+      from: `"EduSphere Security" <${process.env.EMAIL_USER}>`,
+      to: user.email,
+      subject: `✅ EduSphere Password Successfully Updated`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 540px; margin: 0 auto; padding: 24px; background: #ffffff; border-radius: 12px; border: 1px solid #e5e7eb;">
+          <h2 style="color: #16a34a; margin-top: 0;">Password Successfully Changed</h2>
+          <p style="color: #374151; font-size: 15px;">Hello <strong>${user.name}</strong>,</p>
+          <p style="color: #4b5563; font-size: 14px; line-height: 1.5;">
+            The password for your EduSphere <strong>${user.role}</strong> account (${user.email}) was successfully changed on <strong>${new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</strong>.
+          </p>
+          <p style="color: #4b5563; font-size: 14px;">
+            You can now log in using your new credentials.
+          </p>
+          <p style="color: #dc2626; font-size: 13px; margin-top: 20px;">
+            If you did not make this change, please contact our security team immediately.
+          </p>
+          <hr style="border: none; border-top: 1px solid #f3f4f6; margin: 20px 0;">
+          <p style="color: #9ca3af; font-size: 12px; text-align: center;">© ${new Date().getFullYear()} EduSphere Learning Platform</p>
+        </div>
+      `,
+    }).catch((err) => {
+      console.warn("Failed to send password reset confirmation email:", err.message);
+    });
+
+    res.json({
+      success: true,
+      message: "Your password has been successfully reset! You can now log in with your new password.",
+      role: user.role,
+    });
+  } catch (error) {
+    console.error("Reset password error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to reset password.",
+    });
   }
 });
 

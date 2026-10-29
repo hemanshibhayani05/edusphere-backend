@@ -20,7 +20,8 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5000",
   "http://127.0.0.1:5000",
-  "https://edusphere-frontend-2ks3.vercel.app"
+  "https://edusphere-frontend-2ks3.vercel.app",
+  "https://edusphere-frontend-two.vercel.app"
 ];
 
 app.use(
