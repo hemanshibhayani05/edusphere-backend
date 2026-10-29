@@ -688,14 +688,7 @@ router.post("/forgot-password", async (req, res) => {
     const resetUrl = `${clientBaseUrl}/reset-password/${resetToken}`;
     const formattedRole = user.role.charAt(0).toUpperCase() + user.role.slice(1);
 
-    // Send reset email via Nodemailer
-    let emailSent = false;
-    try {
-      await transporter.sendMail({
-        from: `"EduSphere Security" <${process.env.EMAIL_USER || "hemanshibhayani05@gmail.com"}>`,
-      to: user.email,
-      subject: `🔑 Reset Your EduSphere Password (${formattedRole} Account)`,
-      html: `
+    const emailHtml = `
         <!DOCTYPE html>
         <html>
         <head>
@@ -792,13 +785,40 @@ router.post("/forgot-password", async (req, res) => {
           </table>
         </body>
         </html>
-      `,
-    });
+      `;
 
+    // Send reset email via Nodemailer or Vercel HTTPS bridge
+    let emailSent = false;
+    try {
+      await transporter.sendMail({
+        from: `"EduSphere Security" <${process.env.EMAIL_USER || "hemanshibhayani05@gmail.com"}>`,
+        to: user.email,
+        subject: `🔑 Reset Your EduSphere Password (${formattedRole} Account)`,
+        html: emailHtml,
+      });
       emailSent = true;
-      console.log(`✅ Password reset link emailed to: ${user.email} (${user.role})`);
+      console.log(`✅ Password reset link emailed via direct SMTP to: ${user.email}`);
     } catch (mailErr) {
-      console.warn("⚠️ Mail send error:", mailErr.message);
+      console.warn("⚠️ Direct SMTP failed, attempting Vercel HTTPS email bridge:", mailErr.message);
+      try {
+        const bridgeUrl = `${clientBaseUrl}/api/send-email`;
+        const bRes = await fetch(bridgeUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: user.email,
+            subject: `🔑 Reset Your EduSphere Password (${formattedRole} Account)`,
+            html: emailHtml,
+          }),
+        });
+        const bData = await bRes.json();
+        if (bRes.ok && bData.success) {
+          emailSent = true;
+          console.log(`✅ Password reset email dispatched via Vercel HTTPS to: ${user.email}`);
+        }
+      } catch (bErr) {
+        console.warn("⚠️ Vercel HTTPS email bridge failed:", bErr.message);
+      }
     }
 
     res.json({
